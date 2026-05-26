@@ -3,22 +3,27 @@ let _existsSync: typeof import("node:fs").existsSync | null = null;
 let _homedir: typeof import("node:os").homedir | null = null;
 let _join: typeof import("node:path").join | null = null;
 
-type DynamicImport = (specifier: string) => Promise<unknown>;
+declare const __non_webpack_require__: NodeRequire | undefined;
 
-const dynamicImport: DynamicImport = (specifier) => import(specifier);
-const NODE_FS_SPECIFIER = "node:" + "fs";
-const NODE_OS_SPECIFIER = "node:" + "os";
-const NODE_PATH_SPECIFIER = "node:" + "path";
+function nodeRequire(): NodeRequire {
+	if (typeof __non_webpack_require__ !== "undefined") {
+		return __non_webpack_require__;
+	}
+	// Prevent webpack from statically analyzing a bare `require` call.
+	return new Function("return require")() as NodeRequire;
+}
 
-// Eagerly load in Node.js/Bun environment only
+// Eagerly load in Node.js/Bun environment only. Each import uses a string
+// literal plus webpackIgnore so Next.js webpack does not replace them with
+// a catch-all dynamic-import stub that throws MODULE_NOT_FOUND at build time.
 if (typeof process !== "undefined" && (process.versions?.node || process.versions?.bun)) {
-	dynamicImport(NODE_FS_SPECIFIER).then((m) => {
+	void import(/* webpackIgnore: true */ "node:fs").then((m) => {
 		_existsSync = (m as typeof import("node:fs")).existsSync;
 	});
-	dynamicImport(NODE_OS_SPECIFIER).then((m) => {
+	void import(/* webpackIgnore: true */ "node:os").then((m) => {
 		_homedir = (m as typeof import("node:os")).homedir;
 	});
-	dynamicImport(NODE_PATH_SPECIFIER).then((m) => {
+	void import(/* webpackIgnore: true */ "node:path").then((m) => {
 		_join = (m as typeof import("node:path")).join;
 	});
 }
@@ -42,7 +47,7 @@ function getProcEnv(key: string): string | undefined {
 	if (_procEnvCache === null) {
 		_procEnvCache = new Map();
 		try {
-			const { readFileSync } = require("node:fs") as typeof import("node:fs");
+			const { readFileSync } = nodeRequire()("node:fs") as typeof import("node:fs");
 			const data = readFileSync("/proc/self/environ", "utf-8");
 			for (const entry of data.split("\0")) {
 				const idx = entry.indexOf("=");

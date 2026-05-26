@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import { getEnvApiKey } from "../../packages/pi-ai/src/env-api-keys.ts";
 import type { OAuthAuthInfo, OAuthPrompt, OAuthProviderInterface } from "../../packages/pi-ai/dist/oauth.js";
@@ -240,6 +243,54 @@ const OPTIONAL_SECTION_CATALOG: OptionalSectionCatalogEntry[] = [
 const CLI_AUTH_PROVIDER_IDS = new Set([
   "claude-code",
 ]);
+
+/** Keep in sync with FLOW_VERSION in src/resources/extensions/gsd/onboarding-state.ts */
+const ONBOARDING_FLOW_VERSION = 1;
+
+function onboardingRecordPath(): string {
+  const agentDir =
+    process.env.GSD_CODING_AGENT_DIR ||
+    join(process.env.GSD_HOME || join(homedir(), ".gsd"), "agent");
+  return join(agentDir, "onboarding.json");
+}
+
+function readWebOnboardingCompletionRecord(): OnboardingCompletionRecord | null {
+  const file = onboardingRecordPath();
+  if (!existsSync(file)) {
+    return null;
+  }
+
+  try {
+    const raw = JSON.parse(readFileSync(file, "utf-8")) as Partial<{
+      flowVersion: number;
+      completedAt: string | null;
+      completedSteps: string[];
+      skippedSteps: string[];
+      lastResumePoint: string | null;
+    }>;
+    const flowVersion = typeof raw.flowVersion === "number" ? raw.flowVersion : 0;
+    const completedSteps = Array.isArray(raw.completedSteps)
+      ? raw.completedSteps.filter((step): step is string => typeof step === "string")
+      : [];
+    const skippedSteps = Array.isArray(raw.skippedSteps)
+      ? raw.skippedSteps.filter((step): step is string => typeof step === "string")
+      : [];
+    const completedAt =
+      typeof raw.completedAt === "string" && flowVersion === ONBOARDING_FLOW_VERSION
+        ? raw.completedAt
+        : null;
+
+    return {
+      completedAt,
+      completedSteps,
+      skippedSteps,
+      lastResumePoint: typeof raw.lastResumePoint === "string" ? raw.lastResumePoint : null,
+      flowVersion,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function defaultIsExternalCliProvider(id: string): boolean {
   return CLI_AUTH_PROVIDER_IDS.has(id);
@@ -816,23 +867,9 @@ export class OnboardingService {
     const optionalSections = this.buildOptionalSectionState(authStorage);
     const lockReason = resolveOnboardingLockReason(Boolean(satisfiedByProvider), this.bridgeAuthRefresh);
 
-    // Read CLI-side completion record (best-effort — never throw)
-    let completionRecord: OnboardingCompletionRecord | null = null;
-    try {
-      const { readOnboardingRecord, isOnboardingComplete } = await import(
-        "../resources/extensions/gsd/onboarding-state.js"
-      );
-      const r = readOnboardingRecord();
-      completionRecord = {
-        completedAt: isOnboardingComplete() ? r.completedAt : null,
-        completedSteps: r.completedSteps,
-        skippedSteps: r.skippedSteps,
-        lastResumePoint: r.lastResumePoint,
-        flowVersion: r.flowVersion,
-      };
-    } catch {
-      completionRecord = null;
-    }
+    // Read CLI-side completion record (best-effort — never throw). Inline reader
+    // avoids pulling GSD extension modules (file-lock, gsd-db) into the web bundle.
+    const completionRecord = readWebOnboardingCompletionRecord();
 
     return {
       status: lockReason ? "blocked" : "ready",

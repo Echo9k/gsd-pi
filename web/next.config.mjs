@@ -31,6 +31,9 @@ const nextConfig = {
       // a simple object entry so `require("node:module")` passes through.
       config.externals.push({
         'node:module': 'commonjs node:module',
+        'node:fs': 'commonjs node:fs',
+        'node:os': 'commonjs node:os',
+        'node:path': 'commonjs node:path',
         // @gsd/native is a native addon loaded via runtime require().
         // serverExternalPackages handles the top-level import, but webpack
         // still tries to resolve the bare specifier inside files traced from
